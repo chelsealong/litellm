@@ -5852,7 +5852,11 @@ def _build_key_filter_conditions(
         else:
             user_condition["user_id"] = user_id
     if exclude_team_id and isinstance(exclude_team_id, str):
-        user_condition["team_id"] = {"not": exclude_team_id}
+        # team_id is nullable, and SQL's `team_id <> exclude_team_id` evaluates to NULL
+        # (not TRUE) for NULL rows, silently dropping keys with no team. Keep them.
+        not_excluded: Final[dict[str, object]] = {"team_id": {"not": exclude_team_id}}  # mutable-ok: one-shot filter
+        no_team: Final[dict[str, object]] = {"team_id": None}  # mutable-ok: one-shot filter literal
+        user_condition["OR"] = [not_excluded, no_team]  # mutable-ok: one-shot filter literal
     if organization_id and isinstance(organization_id, str):
         user_condition["organization_id"] = organization_id
 

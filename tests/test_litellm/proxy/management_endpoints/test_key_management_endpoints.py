@@ -241,11 +241,15 @@ async def test_list_keys_include_created_by_keys():
         elif "created_by" in condition:
             created_by_condition_with_exclude = condition
 
-    # Verify exclude_team_id is applied to user condition
+    # Verify exclude_team_id is applied to user condition as a NULL-safe OR:
+    # team_id != excluded OR team_id IS NULL, so keys with no team still match.
     assert (
         user_condition_with_exclude is not None
     ), "User condition with exclude should be present"
-    assert user_condition_with_exclude["team_id"] == {"not": "excluded-team-123"}
+    assert user_condition_with_exclude["OR"] == [
+        {"team_id": {"not": "excluded-team-123"}},
+        {"team_id": None},
+    ]
 
     # Verify created_by condition still only has created_by filter
     assert (
@@ -6170,6 +6174,60 @@ def test_build_key_filter_conditions_member_only_team_restricts_to_service_accou
     assert (
         expected in serialized
     ), f"member-only team must be restricted to user_id=NULL keys, got: {serialized}"
+
+
+def _sql_matches(where, record):
+    """Evaluate a Prisma-style where clause against a record using SQL NULL semantics
+    (a `not` comparison against NULL is neither true nor false, so it doesn't match)."""
+    for key, condition in where.items():
+        if key == "AND":
+            if not all(_sql_matches(c, record) for c in condition):
+                return False
+        elif key == "OR":
+            if not any(_sql_matches(c, record) for c in condition):
+                return False
+        elif isinstance(condition, dict) and "not" in condition:
+            if record.get(key) is None or record.get(key) == condition["not"]:
+                return False
+        elif isinstance(condition, dict) and "in" in condition:
+            if record.get(key) not in condition["in"]:
+                return False
+        elif record.get(key) != condition:
+            return False
+    return True
+
+
+def test_build_key_filter_conditions_exclude_team_id_keeps_null_team_keys():
+    """
+    Regression test for https://github.com/BerriAI/litellm/issues/37292:
+    a key with team_id=NULL was silently dropped by exclude_team_id, because
+    `team_id != 'litellm-dashboard'` is NULL (not true) for NULL rows in SQL.
+    """
+    from litellm.proxy.management_endpoints.key_management_endpoints import (
+        _build_key_filter_conditions,
+    )
+
+    where = _build_key_filter_conditions(
+        user_id=None,
+        team_id=None,
+        organization_id=None,
+        key_alias=None,
+        key_hash=None,
+        exclude_team_id="litellm-dashboard",
+        admin_team_ids=None,
+        member_team_ids=None,
+        include_created_by_keys=False,
+    )
+
+    assert _sql_matches(
+        where, {"team_id": None}
+    ), f"key with no team must not be excluded, got where={where}"
+    assert not _sql_matches(
+        where, {"team_id": "litellm-dashboard"}
+    ), f"dashboard session token must still be excluded, got where={where}"
+    assert _sql_matches(
+        where, {"team_id": "some-other-team"}
+    ), f"key on an unrelated team must not be excluded, got where={where}"
 
 
 def test_build_key_filter_conditions_agent_id_narrows_visibility():
