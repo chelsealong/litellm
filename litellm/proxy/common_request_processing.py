@@ -1322,13 +1322,18 @@ def _has_attribute_error_in_chain(exc: Exception) -> bool:
 _CLIENT_DISCONNECT_DETAIL: Final = "Client disconnected the request"
 
 
-def _log_llm_api_exception(e: Exception) -> None:
+def _log_llm_api_exception(e: Exception, litellm_call_id: str | None) -> None:
     if getattr(e, "status_code", None) == 499 and getattr(e, "detail", None) == _CLIENT_DISCONNECT_DETAIL:
         verbose_proxy_logger.info(
-            "litellm.proxy.proxy_server._handle_llm_api_exception(): client disconnected, upstream LLM request cancelled"
+            "litellm.proxy.proxy_server._handle_llm_api_exception(): client disconnected, upstream LLM request cancelled - litellm_call_id=%s",
+            litellm_call_id,
         )
         return
-    verbose_proxy_logger.exception("litellm.proxy.proxy_server._handle_llm_api_exception(): Exception occured - %s", e)
+    verbose_proxy_logger.exception(
+        "litellm.proxy.proxy_server._handle_llm_api_exception(): Exception occured - %s - litellm_call_id=%s",
+        e,
+        litellm_call_id,
+    )
 
 
 async def _cancel_llm_call_on_client_disconnect(
@@ -3046,7 +3051,11 @@ class ProxyBaseLLMRequestProcessing:
         version: str | None = None,
     ):
         """Raises ProxyException (OpenAI API compatible) if an exception is raised"""
-        _log_llm_api_exception(e)
+        _litellm_logging_obj: Final[LiteLLMLoggingObj | None] = self.data.get("litellm_logging_obj", None)
+        litellm_call_id: Final = (
+            _litellm_logging_obj.litellm_call_id if _litellm_logging_obj else self.data.get("litellm_call_id")
+        )
+        _log_llm_api_exception(e, litellm_call_id)
         # Allow callbacks to transform the error response
         transformed_exception: Final = await proxy_logging_obj.post_call_failure_hook(
             user_api_key_dict=user_api_key_dict,
@@ -3066,7 +3075,6 @@ class ProxyBaseLLMRequestProcessing:
         timeout: Final = getattr(
             e, "timeout", None
         )  # returns the timeout set by the wrapper. Used for testing if model-specific timeout are set correctly
-        _litellm_logging_obj: Final[LiteLLMLoggingObj | None] = self.data.get("litellm_logging_obj", None)
 
         # Attempt to get model_id from logging object
         #
@@ -3076,9 +3084,7 @@ class ProxyBaseLLMRequestProcessing:
 
         custom_headers: Final = ProxyBaseLLMRequestProcessing.get_custom_headers(
             user_api_key_dict=user_api_key_dict,
-            call_id=(
-                _litellm_logging_obj.litellm_call_id if _litellm_logging_obj else self.data.get("litellm_call_id")
-            ),
+            call_id=litellm_call_id,
             model_id=model_id,
             version=version,
             response_cost=0,

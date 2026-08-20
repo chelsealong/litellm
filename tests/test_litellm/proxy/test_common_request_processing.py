@@ -4060,6 +4060,49 @@ class TestCancelOnDisconnect:
         proxy_logging_obj.post_call_failure_hook.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+class TestHandleLLMApiExceptionLogsCallId:
+    """
+    Regression for #37532: the error log emitted for a failed LLM request
+    must carry the litellm_call_id so it can be correlated with the
+    x-litellm-call-id response header and the spend logs table.
+    """
+
+    async def _invoke(self, data: dict):
+        from litellm.proxy._types import UserAPIKeyAuth
+
+        processor = ProxyBaseLLMRequestProcessing(data=data)
+        proxy_logging_obj = MagicMock()
+        proxy_logging_obj.post_call_failure_hook = AsyncMock(return_value=None)
+        proxy_logging_obj.post_call_response_headers_hook = AsyncMock(return_value={})
+
+        with patch(
+            "litellm.proxy.common_request_processing.verbose_proxy_logger"
+        ) as mock_logger:
+            with pytest.raises(Exception):
+                await processor._handle_llm_api_exception(
+                    e=litellm.Timeout(
+                        message="Request timed out.",
+                        model="gpt-4",
+                        llm_provider="openai",
+                    ),
+                    user_api_key_dict=UserAPIKeyAuth(api_key="sk-test"),
+                    proxy_logging_obj=proxy_logging_obj,
+                )
+        return mock_logger
+
+    async def test_call_id_from_request_data_is_logged(self):
+        mock_logger = await self._invoke({"litellm_call_id": "call-id-from-data-123"})
+        logged_args = mock_logger.exception.call_args.args
+        assert "call-id-from-data-123" in logged_args
+
+    async def test_call_id_from_logging_obj_is_logged(self):
+        logging_obj = MagicMock(litellm_call_id="call-id-from-logging-obj-456")
+        mock_logger = await self._invoke({"litellm_logging_obj": logging_obj})
+        logged_args = mock_logger.exception.call_args.args
+        assert "call-id-from-logging-obj-456" in logged_args
+
+
 class TestAllmPassthroughRoutePostCallGuardrails:
     """
     Regression: non-streaming allm_passthrough_route responses are httpx.Response objects.
