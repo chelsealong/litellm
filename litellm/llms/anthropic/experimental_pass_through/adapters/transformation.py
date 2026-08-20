@@ -917,6 +917,7 @@ class LiteLLMAnthropicMessagesAdapter:
             metadata: Final = anthropic_message_request["metadata"]
             if metadata and "user_id" in metadata:
                 new_kwargs["user"] = metadata["user_id"]
+                new_kwargs["prompt_cache_key"] = metadata["user_id"]
 
         if "litellm_metadata" in anthropic_message_request:
             # metadata will be passed to litellm.acompletion(), it's a litellm_param

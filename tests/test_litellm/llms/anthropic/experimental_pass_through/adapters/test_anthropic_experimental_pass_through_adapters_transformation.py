@@ -635,6 +635,22 @@ def test_translate_anthropic_to_openai_orders_top_level_and_midturn_system():
     ]
 
 
+def test_translate_anthropic_to_openai_metadata_user_id_also_mapped_to_prompt_cache_key():
+    """metadata.user_id must populate both the deprecated `user` field and `prompt_cache_key`,
+    the field OpenAI's prompt caching keys routing off of."""
+    openai_request, _ = LiteLLMAnthropicMessagesAdapter().translate_anthropic_to_openai(
+        anthropic_message_request={
+            "model": "claude-3-5-sonnet-20240620",
+            "max_tokens": 100,
+            "messages": [{"role": "user", "content": "hello"}],
+            "metadata": {"user_id": "session-abc-123"},
+        }
+    )
+
+    assert openai_request["user"] == "session-abc-123"
+    assert openai_request["prompt_cache_key"] == "session-abc-123"
+
+
 def test_translate_openai_content_to_anthropic_empty_function_arguments():
     """Test that empty function arguments are handled safely and don't cause JSON parsing errors."""
 

@@ -927,6 +927,7 @@ class ChatCompletionRequest(TypedDict, total=False):
     function_call: str | dict
     functions: list
     user: str
+    prompt_cache_key: str
     metadata: dict  # litellm specific param
     reasoning_effort: str  # OpenAI o1/o3 reasoning parameter
     output_config: Mapping[str, object]  # Anthropic adaptive-thinking effort, bridged for Bedrock Claude

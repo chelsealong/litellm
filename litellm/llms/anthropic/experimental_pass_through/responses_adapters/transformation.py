@@ -452,10 +452,12 @@ class LiteLLMAnthropicToResponsesAPIAdapter:
             if openai_cm is not None:
                 responses_kwargs["context_management"] = openai_cm
 
-        # metadata user_id -> user
+        # metadata user_id -> user + prompt_cache_key
         metadata: Final = anthropic_request.get("metadata")
         if isinstance(metadata, dict) and "user_id" in metadata:
-            responses_kwargs["user"] = str(metadata["user_id"])[:64]
+            user_id: Final = str(metadata["user_id"])[:64]
+            responses_kwargs["user"] = user_id
+            responses_kwargs["prompt_cache_key"] = user_id
 
         return responses_kwargs
 

@@ -992,6 +992,17 @@ class TestTranslateRequestBroaderCoverage:
         kwargs = _ADAPTER.translate_request(req)
         assert len(kwargs["user"]) == 64
 
+    def test_metadata_user_id_also_mapped_to_prompt_cache_key(self):
+        req = _make_request(metadata={"user_id": "user-42"})
+        kwargs = _ADAPTER.translate_request(req)
+        assert kwargs["prompt_cache_key"] == "user-42"
+
+    def test_metadata_user_id_prompt_cache_key_truncated_to_64_chars(self):
+        long_id = "x" * 100
+        req = _make_request(metadata={"user_id": long_id})
+        kwargs = _ADAPTER.translate_request(req)
+        assert len(kwargs["prompt_cache_key"]) == 64
+
     def test_no_optional_fields_does_not_add_spurious_keys(self):
         req = _make_request()
         kwargs = _ADAPTER.translate_request(req)
@@ -1005,6 +1016,7 @@ class TestTranslateRequestBroaderCoverage:
             "text",
             "context_management",
             "user",
+            "prompt_cache_key",
         ):
             assert key not in kwargs, f"unexpected key: {key}"
 
