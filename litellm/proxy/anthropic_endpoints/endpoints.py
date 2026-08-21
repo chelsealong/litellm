@@ -188,39 +188,11 @@ async def anthropic_response(
         )
         return JSONResponse(status_code=e.status_code, content=body)
     except Exception as e:
-        await proxy_logging_obj.post_call_failure_hook(
-            user_api_key_dict=user_api_key_dict, original_exception=e, request_data=base_llm_response_processor.data
-        )
-        verbose_proxy_logger.exception("litellm.proxy.proxy_server.anthropic_response(): Exception occured - %s", e)
-
-        if isinstance(e, ProxyException):
-            raise
-
-        # Extract model_id from request metadata (same as success path)
-        litellm_metadata: Final = data.get("litellm_metadata", {}) or {}
-        model_info: Final = litellm_metadata.get("model_info", {}) or {}
-        model_id: Final = model_info.get("id", "") or ""
-
-        # Get headers
-        headers: Final = ProxyBaseLLMRequestProcessing.get_custom_headers(
+        raise await base_llm_response_processor._handle_llm_api_exception(
+            e=e,
             user_api_key_dict=user_api_key_dict,
-            call_id=data.get("litellm_call_id", ""),
-            model_id=model_id,
+            proxy_logging_obj=proxy_logging_obj,
             version=version,
-            response_cost=0,
-            model_region=getattr(user_api_key_dict, "allowed_model_region", ""),
-            request_data=data,
-            timeout=getattr(e, "timeout", None),
-            litellm_logging_obj=None,
-        )
-
-        error_msg: Final = f"{e}"
-        raise ProxyException(
-            message=getattr(e, "message", error_msg),
-            type=getattr(e, "type", "None"),
-            param=getattr(e, "param", "None"),
-            code=getattr(e, "status_code", 500),
-            headers=headers,
         )
 
 

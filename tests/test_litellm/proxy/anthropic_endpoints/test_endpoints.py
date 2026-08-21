@@ -150,7 +150,7 @@ class TestProxyExceptionPassthrough:
             ),
             patch.object(proxy_server, "proxy_logging_obj") as mock_logging,
         ):
-            mock_logging.post_call_failure_hook = AsyncMock()
+            mock_logging.post_call_failure_hook = AsyncMock(return_value=None)
             with pytest.raises(ProxyException) as exc_info:
                 await ep.anthropic_response(
                     fastapi_response=MagicMock(),
@@ -164,20 +164,66 @@ class TestProxyExceptionPassthrough:
         mock_logging.post_call_failure_hook.assert_awaited_once()
 
 
+class TestAnthropicResponseForwardsUpstreamHeaders:
+    @pytest.mark.asyncio
+    async def test_anthropic_response_forwards_ratelimit_headers_on_429(self):
+        """An anthropic-compatible upstream (e.g. GLM) can return
+        `anthropic-ratelimit-unified-status` / `retry-after` on a 429; those
+        headers must reach the client so ClaudeCode fails fast instead of
+        retrying forever. Regression for #37754."""
+        import litellm.proxy.anthropic_endpoints.endpoints as ep
+        import litellm.proxy.proxy_server as proxy_server
+        from litellm.llms.base_llm.chat.transformation import BaseLLMException
+        from litellm.proxy._types import ProxyException, UserAPIKeyAuth
+
+        exc = BaseLLMException(
+            status_code=429,
+            message='{"type":"error","error":{"type":"rate_limit_error","code":"1310"}}',
+            headers={"retry-after": "287441", "anthropic-ratelimit-unified-status": "rejected"},
+        )
+
+        with (
+            patch.object(ep, "_read_request_body", new=AsyncMock(return_value={"model": "glm"})),
+            patch.object(
+                ep.ProxyBaseLLMRequestProcessing,
+                "base_process_llm_request",
+                new=AsyncMock(side_effect=exc),
+            ),
+            patch.object(proxy_server, "proxy_logging_obj") as mock_logging,
+        ):
+            mock_logging.post_call_failure_hook = AsyncMock(return_value=None)
+            mock_logging.post_call_response_headers_hook = AsyncMock(return_value={})
+            with pytest.raises(ProxyException) as exc_info:
+                await ep.anthropic_response(
+                    fastapi_response=MagicMock(),
+                    request=MagicMock(),
+                    user_api_key_dict=UserAPIKeyAuth(api_key="sk-test"),
+                )
+
+        assert exc_info.value.code == "429"
+        assert exc_info.value.headers["retry-after"] == "287441"
+        assert exc_info.value.headers["anthropic-ratelimit-unified-status"] == "rejected"
+
+
 class TestFailureHookRequestData:
     @pytest.mark.asyncio
     async def test_failure_hook_gets_post_setup_data_with_logging_obj(self):
         """Request setup replaces the processor's data dict (adding the logging
         object the failure hook needs to lift token usage from); the exception
         handler must pass that replaced dict, not the raw request body dict."""
+        from types import SimpleNamespace
+
         import litellm.proxy.anthropic_endpoints.endpoints as ep
         import litellm.proxy.proxy_server as proxy_server
         from litellm.proxy._types import ProxyException, UserAPIKeyAuth
 
         captured = {}
+        # A real Logging instance exposes `litellm_call_id`, which the shared
+        # exception handler reads directly; a bare string sentinel doesn't.
+        fake_logging_obj = SimpleNamespace(litellm_call_id="logging-obj-sentinel")
 
         async def fake_process(self, **kwargs):
-            self.data = {**self.data, "litellm_logging_obj": "logging-obj-sentinel"}
+            self.data = {**self.data, "litellm_logging_obj": fake_logging_obj}
             captured["processor_data"] = self.data
             raise RuntimeError("provider timeout")
 
@@ -186,7 +232,7 @@ class TestFailureHookRequestData:
             patch.object(ep.ProxyBaseLLMRequestProcessing, "base_process_llm_request", new=fake_process),
             patch.object(proxy_server, "proxy_logging_obj") as mock_logging,
         ):
-            mock_logging.post_call_failure_hook = AsyncMock()
+            mock_logging.post_call_failure_hook = AsyncMock(return_value=None)
             with pytest.raises(ProxyException):
                 await ep.anthropic_response(
                     fastapi_response=MagicMock(),
@@ -196,7 +242,7 @@ class TestFailureHookRequestData:
 
         hook_request_data = mock_logging.post_call_failure_hook.await_args.kwargs["request_data"]
         assert hook_request_data is captured["processor_data"]
-        assert hook_request_data["litellm_logging_obj"] == "logging-obj-sentinel"
+        assert hook_request_data["litellm_logging_obj"] is fake_logging_obj
 
 
 class TestEventLoggingBatchEndpoint:
