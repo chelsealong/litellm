@@ -9,9 +9,11 @@ from litellm.litellm_core_utils.prompt_templates.image_handling import (
     async_convert_url_to_base64,
     convert_url_to_base64,
 )
+from litellm.llms.azure.common_utils import get_azure_ad_token
 from litellm.llms.base_llm.ocr.transformation import DocumentType, OCRRequestData
 from litellm.llms.mistral.ocr.transformation import MistralOCRConfig
 from litellm.secret_managers.main import get_secret_str
+from litellm.types.router import GenericLiteLLMParams
 
 AZURE_AI_OCR_API_KEY_ENV_VAR: Final = "AZURE_AI_API_KEY"
 
@@ -52,6 +54,10 @@ class AzureAIOCRConfig(MistralOCRConfig):
         # Get API key from environment if not provided
         if api_key is None:
             api_key = get_secret_str(AZURE_AI_OCR_API_KEY_ENV_VAR)
+
+        # No static key configured - fall back to Azure AD token auth, same as azure_ai chat
+        if api_key is None:
+            api_key = get_azure_ad_token(GenericLiteLLMParams(**(litellm_params or {})))
 
         if api_key is None:
             raise ValueError(
