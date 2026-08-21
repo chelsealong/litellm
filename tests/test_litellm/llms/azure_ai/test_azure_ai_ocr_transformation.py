@@ -57,12 +57,12 @@ def test_azure_ai_ocr_validate_environment_raises_without_any_credential():
             "litellm.llms.azure_ai.ocr.transformation.get_secret_str",
             return_value=None,
         ),
+        pytest.raises(ValueError, match="Missing Azure AI API Key"),
     ):
-        with pytest.raises(ValueError, match="Missing Azure AI API Key"):
-            config.validate_environment(
-                headers={},
-                model="mistral-ocr-2503",
-                api_key=None,
-                api_base="https://my-endpoint.services.ai.azure.com",
-                litellm_params={},
-            )
+        config.validate_environment(
+            headers={},
+            model="mistral-ocr-2503",
+            api_key=None,
+            api_base="https://my-endpoint.services.ai.azure.com",
+            litellm_params={},
+        )
