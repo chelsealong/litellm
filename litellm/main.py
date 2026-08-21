@@ -1039,6 +1039,16 @@ def responses_api_bridge_check(
             mode = "responses"
             model_info["mode"] = mode
 
+    # Perplexity's Agent API namespaces vendor model ids under the litellm provider
+    # prefix again (e.g. `perplexity/perplexity/glm-5.2`, `perplexity/openai/gpt-5.2`), so
+    # after get_llm_provider strips the outer "perplexity/" once, the remaining model
+    # string still carries a "/". That shape reliably means an Agent API deployment: on
+    # chat completions it either collides with an unrelated flat chat entry (e.g.
+    # `perplexity/sonar`) or has no cost-map entry to read `mode` from at all, while
+    # `/v1/responses` accepts the same model id with no cost-map lookup.
+    if custom_llm_provider == "perplexity" and "/" in model and model_info.get("mode") != "responses":
+        model_info["mode"] = "responses"
+
     # OpenAI/Azure GPT-5 chat-completions that need Responses-only fields (e.g.
     # ``reasoningSummary`` in ``extra_body``) must be bridged; Chat Completions rejects
     # those keys.

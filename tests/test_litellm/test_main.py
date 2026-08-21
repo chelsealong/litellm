@@ -1388,6 +1388,42 @@ def test_responses_api_bridge_check_handles_exception():
         assert model_info["mode"] == "responses"
 
 
+def test_responses_api_bridge_check_perplexity_agent_api_sonar_collision_routes_to_responses():
+    """A Perplexity Agent API deployment (`perplexity/perplexity/<id>`) reaches this
+    function as `model="perplexity/<id>"`. For `perplexity/sonar`, that string collides
+    with the pre-existing flat chat cost-map entry of the same name, which must not win
+    over the Agent API routing.
+
+    Regression test for https://github.com/BerriAI/litellm/issues/37761
+    """
+    from litellm.main import responses_api_bridge_check
+
+    model_info, model = responses_api_bridge_check(
+        model="perplexity/sonar",
+        custom_llm_provider="perplexity",
+    )
+
+    assert model == "perplexity/sonar"
+    assert model_info.get("mode") == "responses"
+
+
+def test_responses_api_bridge_check_perplexity_agent_api_model_without_cost_map_entry():
+    """A Perplexity Agent API model id with no cost-map entry at all must still route to
+    the responses bridge; chat completions there 400s with a model id nobody wrote.
+
+    Regression test for https://github.com/BerriAI/litellm/issues/37761
+    """
+    from litellm.main import responses_api_bridge_check
+
+    model_info, model = responses_api_bridge_check(
+        model="perplexity/nemotron-3-ultra-550b-a55b",
+        custom_llm_provider="perplexity",
+    )
+
+    assert model == "perplexity/nemotron-3-ultra-550b-a55b"
+    assert model_info.get("mode") == "responses"
+
+
 def test_responses_api_bridge_check_global_flag_routes_openai():
     """When route_all_chat_openai_to_responses is True, any OpenAI model routes to responses."""
     from litellm.main import responses_api_bridge_check
