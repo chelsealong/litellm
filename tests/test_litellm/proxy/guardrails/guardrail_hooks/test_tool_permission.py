@@ -721,6 +721,38 @@ class TestToolPermissionGuardrail:
             f"got: {chunks[0].choices[0].delta.content!r}"
         )
 
+    @pytest.mark.asyncio
+    async def test_async_post_call_streaming_iterator_hook_tolerates_unparseable_chunk(
+        self,
+    ):
+        """Regression for https://github.com/BerriAI/litellm/issues/37873
+
+        A malformed chunk from a provider's streaming iterator makes
+        stream_chunk_builder raise instead of returning. The hook must fall
+        through to yielding the raw chunks rather than crashing.
+        """
+        text_chunk = ModelResponseStream(
+            id="chatcmpl-plain-text",
+            created=1700000000,
+            model="gpt-4",
+            object="chat.completion.chunk",
+            choices=[],
+        )
+
+        async def _fake_stream():
+            yield text_chunk
+
+        with patch("litellm.main.stream_chunk_builder", side_effect=TypeError("byte indices must be integers")):
+            chunks = []
+            async for chunk in self.guardrail.async_post_call_streaming_iterator_hook(
+                user_api_key_dict=UserAPIKeyAuth(),
+                response=_fake_stream(),
+                request_data={},
+            ):
+                chunks.append(chunk)
+
+        assert chunks == [text_chunk]
+
     def test_modify_response_with_permission_errors(self):
         # Setup a response with one tool_call
         tool_call = ChatCompletionMessageToolCall(

@@ -888,8 +888,22 @@ class ToolPermissionGuardrail(CustomGuardrail):
         async for chunk in response:
             all_chunks.append(chunk)
 
+        def _build_model_response_from_chunks() -> ModelResponse | TextCompletionResponse | None:
+            # A malformed chunk from a provider's streaming iterator (e.g. a raw, unparsed
+            # frame) makes stream_chunk_builder raise instead of returning. The stream already
+            # completed successfully, so a scan failure should fall through, not crash the hook.
+            try:
+                return stream_chunk_builder(chunks=all_chunks)
+            except Exception as e:
+                verbose_proxy_logger.warning(
+                    "%s: failed to assemble streamed chunks for tool permission check: %s",
+                    self.guardrail_name,
+                    e,
+                )
+                return None
+
         assembled_model_response: Final[ModelResponse | TextCompletionResponse | None] = (
-            stream_chunk_builder(chunks=all_chunks) if not is_raw_sse_stream(all_chunks) else None
+            _build_model_response_from_chunks() if not is_raw_sse_stream(all_chunks) else None
         )
         if isinstance(assembled_model_response, ModelResponse):
             denied_tools = self._check_assembled_stream(assembled_model_response)

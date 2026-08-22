@@ -15,7 +15,10 @@ from litellm.types.utils import Choices, ModelResponse
 
 
 def is_raw_sse_stream(all_chunks: Sequence[object]) -> bool:
-    return any(isinstance(chunk, (str, bytes)) for chunk in all_chunks)
+    # A genuine /v1/messages passthrough never produces a parsed ModelResponseStream chunk, so
+    # a single one mixed in (e.g. a malformed frame from another provider) means this is an
+    # ordinary chunk stream, not raw SSE - `any` would misroute it into the SSE-only assembler.
+    return bool(all_chunks) and all(isinstance(chunk, (str, bytes)) for chunk in all_chunks)
 
 
 def _joined_sse_stream(all_chunks: Sequence[object]) -> str | None:

@@ -2254,6 +2254,57 @@ async def test_streaming_post_call_only_runs_output_scan():
 
 
 @pytest.mark.asyncio
+async def test_streaming_post_call_tolerates_unparseable_chunk():
+    """
+    Regression for https://github.com/BerriAI/litellm/issues/37873
+
+    Some providers (e.g. nvidia_nim) can yield a raw, non-dict chunk in the
+    collected stream. stream_chunk_builder cannot index into it and raises
+    TypeError; the hook must fall through to yielding the raw chunks instead
+    of surfacing a 500 for an already-successful completion.
+    """
+    guardrail = BedrockGuardrail(
+        guardrail_name="bedrock-stream-unparseable",
+        guardrailIdentifier="test-id",
+        guardrailVersion="DRAFT",
+        event_hook=GuardrailEventHooks.post_call,
+        default_on=True,
+    )
+    mock_chunks = [
+        litellm.ModelResponseStream(
+            id="tid",
+            choices=[
+                litellm.types.utils.StreamingChoices(
+                    delta=litellm.types.utils.Delta(content="Hi", role="assistant"),
+                    finish_reason="stop",
+                    index=0,
+                )
+            ],
+            created=1,
+            model="nvidia_nim/some-model",
+            object="chat.completion.chunk",
+        ),
+        b"raw unparsed chunk",
+    ]
+
+    async def mock_stream():
+        for c in mock_chunks:
+            yield c
+
+    with patch.object(guardrail, "make_bedrock_api_request", AsyncMock()) as mock_make:
+        out = []
+        async for chunk in guardrail.async_post_call_streaming_iterator_hook(
+            user_api_key_dict=UserAPIKeyAuth(),
+            response=mock_stream(),
+            request_data={"model": "nvidia_nim/some-model", "messages": []},
+        ):
+            out.append(chunk)
+
+    assert out == mock_chunks
+    mock_make.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_streaming_post_call_output_only_path_passes_request_data_to_make_bedrock():
     """When INPUT validation is skipped (pre/during already ran), OUTPUT still gets request_data."""
     request_data = {
