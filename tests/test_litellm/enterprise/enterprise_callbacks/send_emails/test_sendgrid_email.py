@@ -1,3 +1,4 @@
+import base64
 import os
 import sys
 import unittest.mock as mock
@@ -114,6 +115,74 @@ async def test_send_email_missing_api_key():
     finally:
         if original_key is not None:
             os.environ["SENDGRID_API_KEY"] = original_key
+
+
+@pytest.mark.asyncio
+async def test_send_email_inline_logo_attachment(
+    mock_env_vars, mock_async_client, tmp_path
+):
+    logo_path = tmp_path / "logo.png"
+    logo_path.write_bytes(b"fake-png-bytes")
+    os.environ["EMAIL_LOGO_PATH"] = str(logo_path)
+
+    try:
+        logger = SendGridEmailLogger()
+        logger.async_httpx_client = mock_async_client
+
+        html_body = (
+            '<img src="https://litellm-listing.s3.amazonaws.com/litellm_logo.png" '
+            'alt="LiteLLM Logo">'
+        )
+
+        await logger.send_email(
+            from_email="test@example.com",
+            to_email=["recipient@example.com"],
+            subject="Test Subject",
+            html_body=html_body,
+        )
+
+        payload = mock_async_client.post.call_args[1]["json"]
+
+        assert "cid:logo" in payload["content"][0]["value"]
+        assert (
+            "https://litellm-listing.s3.amazonaws.com/litellm_logo.png"
+            not in payload["content"][0]["value"]
+        )
+
+        assert len(payload["attachments"]) == 1
+        attachment = payload["attachments"][0]
+        assert attachment["content_id"] == "logo"
+        assert attachment["disposition"] == "inline"
+        assert base64.b64decode(attachment["content"]) == b"fake-png-bytes"
+    finally:
+        del os.environ["EMAIL_LOGO_PATH"]
+
+
+@pytest.mark.asyncio
+async def test_send_email_no_logo_path_uses_external_url(
+    mock_env_vars, mock_async_client
+):
+    logger = SendGridEmailLogger()
+    logger.async_httpx_client = mock_async_client
+
+    html_body = (
+        '<img src="https://litellm-listing.s3.amazonaws.com/litellm_logo.png" '
+        'alt="LiteLLM Logo">'
+    )
+
+    await logger.send_email(
+        from_email="test@example.com",
+        to_email=["recipient@example.com"],
+        subject="Test Subject",
+        html_body=html_body,
+    )
+
+    payload = mock_async_client.post.call_args[1]["json"]
+    assert (
+        "https://litellm-listing.s3.amazonaws.com/litellm_logo.png"
+        in payload["content"][0]["value"]
+    )
+    assert "attachments" not in payload
 
 
 @pytest.mark.asyncio
