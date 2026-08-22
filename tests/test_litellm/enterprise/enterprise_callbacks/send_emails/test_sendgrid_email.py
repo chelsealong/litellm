@@ -2,6 +2,7 @@ import base64
 import os
 import sys
 import unittest.mock as mock
+from unittest.mock import patch
 
 import pytest
 from httpx import Response
@@ -126,7 +127,8 @@ async def test_send_email_inline_logo_attachment(
     os.environ["EMAIL_LOGO_PATH"] = str(logo_path)
 
     try:
-        logger = SendGridEmailLogger()
+        with patch("litellm.proxy.proxy_server.premium_user", True):
+            logger = SendGridEmailLogger()
         logger.async_httpx_client = mock_async_client
 
         html_body = (
@@ -154,6 +156,43 @@ async def test_send_email_inline_logo_attachment(
         assert attachment["content_id"] == "logo"
         assert attachment["disposition"] == "inline"
         assert base64.b64decode(attachment["content"]) == b"fake-png-bytes"
+    finally:
+        del os.environ["EMAIL_LOGO_PATH"]
+
+
+@pytest.mark.asyncio
+async def test_send_email_inline_logo_attachment_non_premium_falls_back_to_external_url(
+    mock_env_vars, mock_async_client, tmp_path
+):
+    logo_path = tmp_path / "logo.png"
+    logo_path.write_bytes(b"fake-png-bytes")
+    os.environ["EMAIL_LOGO_PATH"] = str(logo_path)
+
+    try:
+        with patch("litellm.proxy.proxy_server.premium_user", False):
+            logger = SendGridEmailLogger()
+        logger.async_httpx_client = mock_async_client
+
+        html_body = (
+            '<img src="https://litellm-listing.s3.amazonaws.com/litellm_logo.png" '
+            'alt="LiteLLM Logo">'
+        )
+
+        await logger.send_email(
+            from_email="test@example.com",
+            to_email=["recipient@example.com"],
+            subject="Test Subject",
+            html_body=html_body,
+        )
+
+        payload = mock_async_client.post.call_args[1]["json"]
+
+        assert (
+            "https://litellm-listing.s3.amazonaws.com/litellm_logo.png"
+            in payload["content"][0]["value"]
+        )
+        assert "cid:logo" not in payload["content"][0]["value"]
+        assert "attachments" not in payload
     finally:
         del os.environ["EMAIL_LOGO_PATH"]
 

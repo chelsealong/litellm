@@ -54,6 +54,14 @@ class SendGridEmailLogger(BaseEmailLogger):
         logo_path = os.getenv("EMAIL_LOGO_PATH")
         if not logo_path:
             return None
+
+        from litellm.proxy.proxy_server import premium_user
+
+        if premium_user is not True:
+            verbose_logger.warning(
+                "EMAIL_LOGO_PATH is a premium feature. Ignoring it for non-premium users."
+            )
+            return None
         try:
             with open(logo_path, "rb") as logo_file:
                 encoded_logo = base64.b64encode(logo_file.read()).decode("utf-8")
